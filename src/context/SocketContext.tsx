@@ -25,7 +25,7 @@ interface SocketContextType {
   supabaseAnonKey: string;
 }
 
-const DEFAULT_SERVER_URL = 'http://localhost:3001';
+const DEFAULT_SERVER_URL = 'https://lpp2-server.onrender.com';
 
 const SocketContext = createContext<SocketContextType | null>(null);
 
