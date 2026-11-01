@@ -107,8 +107,9 @@ export const WhiteboardModule: React.FC = () => {
 
     // Draw all stored whiteboard elements
     whiteboardElements.forEach((el) => {
-      ctx.strokeStyle = el.color;
-      ctx.lineWidth = el.strokeWidth * zoom;
+      if (!el) return;
+      ctx.strokeStyle = el.color || '#38bdf8';
+      ctx.lineWidth = (el.strokeWidth || 3) * zoom;
       ctx.lineCap = 'round';
       ctx.lineJoin = 'round';
 

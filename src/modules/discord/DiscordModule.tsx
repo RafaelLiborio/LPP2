@@ -383,17 +383,15 @@ export const DiscordModule: React.FC = () => {
           {/* Server Title with Official Logo */}
           <div className="h-14 px-3 border-b border-gray-800 flex items-center justify-between shadow-sm">
             <div className="flex items-center gap-2 overflow-hidden">
-              <div className="w-7 h-7 rounded-md overflow-hidden shrink-0 bg-indigo-950/60 border border-indigo-500/30">
-                <img
-                  src="./logo.png"
-                  alt="LPP2 Logo"
-                  className="w-[150%] h-[150%] object-cover object-[center_38%] -ml-[25%] -mt-[10%]"
-                  style={{ imageRendering: 'pixelated' }}
-                  onError={(e) => {
-                    (e.target as HTMLImageElement).src = '/logo.png';
-                  }}
-                />
-              </div>
+              <img
+                src="./logo.png"
+                alt="LPP2 Logo"
+                className="w-8 h-8 object-contain shrink-0"
+                style={{ imageRendering: 'pixelated' }}
+                onError={(e) => {
+                  (e.target as HTMLImageElement).src = '/logo.png';
+                }}
+              />
               <span className="font-bold text-white text-xs tracking-wide truncate">
                 LPP2 Studio Hub
               </span>

@@ -28,6 +28,11 @@ function createWindow() {
     autoHideMenuBar: true
   });
 
+  // Open devtools in case of error or key press
+  mainWindow.webContents.on('did-fail-load', (e, code, desc) => {
+    console.error('[LPP2] Failed to load:', code, desc);
+  });
+
   // Enable getDisplayMedia in Electron 17+
   session.defaultSession.setDisplayMediaRequestHandler(async (request, callback) => {
     try {
