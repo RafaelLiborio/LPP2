@@ -31,12 +31,12 @@ export const Navigation: React.FC<NavigationProps> = ({
         <button
           onClick={() => setActiveTab('discord')}
           title="LPP2 Studio - Organizer Software"
-          className="w-13 h-13 rounded-2xl bg-indigo-950/60 border border-indigo-500/40 p-1 flex items-center justify-center shadow-lg shadow-indigo-600/30 hover:scale-105 transition-all overflow-hidden"
+          className="w-14 h-14 rounded-2xl bg-gradient-to-br from-indigo-950/80 to-slate-900/90 border border-indigo-500/50 flex items-center justify-center shadow-lg shadow-indigo-600/30 hover:scale-110 hover:shadow-indigo-500/50 transition-all overflow-hidden group"
         >
           <img
             src="./logo.png"
             alt="LPP2 Studio"
-            className="w-full h-full object-contain"
+            className="w-[150%] h-[150%] object-cover object-[center_38%] group-hover:scale-105 transition-transform"
             style={{ imageRendering: 'pixelated' }}
             onError={(e) => {
               // fallback if path differs
