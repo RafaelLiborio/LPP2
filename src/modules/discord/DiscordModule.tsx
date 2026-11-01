@@ -13,8 +13,11 @@ import {
   Smile,
   Users,
   Shield,
-  CircleDot
+  CircleDot,
+  X,
+  Tv
 } from 'lucide-react';
+import type { ScreenSource } from '../../types';
 
 interface Channel {
   id: string;
@@ -51,6 +54,10 @@ export const DiscordModule: React.FC = () => {
   const [isDeafened, setIsDeafened] = useState(false);
   const [isScreenSharing, setIsScreenSharing] = useState(false);
   const [showEmojiPicker, setShowEmojiPicker] = useState(false);
+
+  // Screen share picker modal state
+  const [availableSources, setAvailableSources] = useState<ScreenSource[]>([]);
+  const [isPickerOpen, setIsPickerOpen] = useState(false);
 
   // WebRTC state
   const localStreamRef = useRef<MediaStream | null>(null);
@@ -213,10 +220,7 @@ export const DiscordModule: React.FC = () => {
       localStreamRef.current.getTracks().forEach((t) => t.stop());
       localStreamRef.current = null;
     }
-    if (screenStreamRef.current) {
-      screenStreamRef.current.getTracks().forEach((t) => t.stop());
-      screenStreamRef.current = null;
-    }
+    stopScreenStream();
     peerConnections.current.forEach((pc) => pc.close());
     peerConnections.current.clear();
     setRemoteStreams(new Map());
@@ -225,41 +229,89 @@ export const DiscordModule: React.FC = () => {
       socket.emit('leave-voice', { roomId: inVoiceRoom });
     }
     setInVoiceRoom(null);
+  };
+
+  const stopScreenStream = () => {
+    if (screenStreamRef.current) {
+      screenStreamRef.current.getTracks().forEach((t) => t.stop());
+      screenStreamRef.current = null;
+    }
     setIsScreenSharing(false);
+    setCurrentUser({ ...currentUser, isScreenSharing: false });
   };
 
   // Toggle Screen Share
   const toggleScreenShare = async () => {
     if (isScreenSharing) {
-      if (screenStreamRef.current) {
-        screenStreamRef.current.getTracks().forEach((t) => t.stop());
-        screenStreamRef.current = null;
-      }
-      setIsScreenSharing(false);
-      setCurrentUser({ ...currentUser, isScreenSharing: false });
-    } else {
+      stopScreenStream();
+      return;
+    }
+
+    // If running in Electron: fetch sources and show picker modal
+    if (window.electronAPI?.getScreenSources) {
       try {
-        const screenStream = await navigator.mediaDevices.getDisplayMedia({
-          video: true,
-          audio: true
-        });
-        screenStreamRef.current = screenStream;
-        setIsScreenSharing(true);
-        setCurrentUser({ ...currentUser, isScreenSharing: true });
-
-        const videoTrack = screenStream.getVideoTracks()[0];
-        videoTrack.onended = () => {
-          setIsScreenSharing(false);
-          setCurrentUser({ ...currentUser, isScreenSharing: false });
-        };
-
-        peerConnections.current.forEach((pc) => {
-          pc.addTrack(videoTrack, screenStream);
-        });
+        const sources = await window.electronAPI.getScreenSources();
+        if (sources && sources.length > 0) {
+          setAvailableSources(sources);
+          setIsPickerOpen(true);
+          return;
+        }
       } catch (err) {
-        console.error('Erro ao iniciar compartilhamento de tela:', err);
+        console.warn('Fallback from electron getScreenSources:', err);
       }
     }
+
+    // Browser or standard fallback
+    try {
+      const screenStream = await navigator.mediaDevices.getDisplayMedia({
+        video: true,
+        audio: true
+      });
+      attachScreenStream(screenStream);
+    } catch (err) {
+      console.error('Erro ao iniciar compartilhamento de tela:', err);
+      alert('Não foi possível iniciar a transmissão de tela. Verifique as permissões de gravação de tela.');
+    }
+  };
+
+  // Start Screen share with a chosen source (Electron native)
+  const selectScreenSource = async (sourceId: string) => {
+    setIsPickerOpen(false);
+    try {
+      const screenStream = await (navigator.mediaDevices as any).getUserMedia({
+        audio: false,
+        video: {
+          mandatory: {
+            chromeMediaSource: 'desktop',
+            chromeMediaSourceId: sourceId,
+            minWidth: 1280,
+            maxWidth: 1920,
+            minHeight: 720,
+            maxHeight: 1080
+          }
+        }
+      });
+      attachScreenStream(screenStream);
+    } catch (err) {
+      console.error('Erro ao capturar fonte de tela:', err);
+      alert('Falha ao capturar a janela/tela selecionada.');
+    }
+  };
+
+  const attachScreenStream = (screenStream: MediaStream) => {
+    screenStreamRef.current = screenStream;
+    setIsScreenSharing(true);
+    setCurrentUser({ ...currentUser, isScreenSharing: true });
+
+    const videoTrack = screenStream.getVideoTracks()[0];
+    videoTrack.onended = () => {
+      stopScreenStream();
+    };
+
+    // Replace or add track to peer connections
+    peerConnections.current.forEach((pc) => {
+      pc.addTrack(videoTrack, screenStream);
+    });
   };
 
   const toggleMute = () => {
@@ -297,7 +349,6 @@ export const DiscordModule: React.FC = () => {
     e.target.value = '';
   };
 
-  // Check if any peer has an active video stream
   const hasActiveVideoStreams = isScreenSharing || Array.from(remoteStreams.values()).some((s) => s.isScreen);
 
   return (
@@ -329,13 +380,23 @@ export const DiscordModule: React.FC = () => {
       {/* 1. Sub-sidebar: Channels */}
       <div className="w-60 bg-[#161720] border-r border-gray-800/80 flex flex-col justify-between shrink-0">
         <div className="flex flex-col h-full overflow-hidden">
-          {/* Server Title */}
-          <div className="h-14 px-4 border-b border-gray-800 flex items-center justify-between shadow-sm">
-            <div className="flex items-center gap-2">
-              <span className="text-xl">⚔️</span>
-              <span className="font-bold text-white text-sm tracking-wide">LPP2 Studio</span>
+          {/* Server Title with Official Logo */}
+          <div className="h-14 px-3 border-b border-gray-800 flex items-center justify-between shadow-sm">
+            <div className="flex items-center gap-2 overflow-hidden">
+              <img
+                src="./logo.png"
+                alt="LPP2 Logo"
+                className="w-7 h-7 object-contain shrink-0"
+                style={{ imageRendering: 'pixelated' }}
+                onError={(e) => {
+                  (e.target as HTMLImageElement).src = '/logo.png';
+                }}
+              />
+              <span className="font-bold text-white text-xs tracking-wide truncate">
+                LPP2 Studio Hub
+              </span>
             </div>
-            <span className="text-[10px] bg-indigo-500/20 text-indigo-400 px-2 py-0.5 rounded font-mono font-bold">
+            <span className="text-[10px] bg-indigo-500/20 text-indigo-400 px-2 py-0.5 rounded font-mono font-bold shrink-0">
               PROD
             </span>
           </div>
@@ -508,6 +569,17 @@ export const DiscordModule: React.FC = () => {
             <p className="text-xs text-gray-400">{activeChannel.description}</p>
           </div>
           <div className="flex items-center gap-3 text-xs text-gray-400">
+            <button
+              onClick={toggleScreenShare}
+              className={`px-3 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition ${
+                isScreenSharing
+                  ? 'bg-rose-600 hover:bg-rose-500 text-white'
+                  : 'bg-indigo-600 hover:bg-indigo-500 text-white shadow-md shadow-indigo-600/20'
+              }`}
+            >
+              <Monitor size={14} />
+              {isScreenSharing ? 'Parar Transmissão' : 'Transmitir Tela'}
+            </button>
             <span className="flex items-center gap-1.5">
               <Users size={14} className="text-indigo-400" />
               {onlineUsers.length} Membros
@@ -515,7 +587,7 @@ export const DiscordModule: React.FC = () => {
           </div>
         </div>
 
-        {/* Video / Screen Share Grid (renders ONLY if someone is transmitting video/screen) */}
+        {/* Video / Screen Share Grid */}
         {hasActiveVideoStreams && (
           <div className="p-4 bg-black/40 border-b border-gray-800 grid grid-cols-1 md:grid-cols-2 gap-3 max-h-72 overflow-y-auto">
             {isScreenSharing && screenStreamRef.current && (
@@ -689,6 +761,53 @@ export const DiscordModule: React.FC = () => {
           ))}
         </div>
       </div>
+
+      {/* Discord-style Screen & Window Picker Modal */}
+      {isPickerOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-4">
+          <div className="w-full max-w-2xl bg-[#181a24] border border-gray-700 rounded-2xl shadow-2xl overflow-hidden flex flex-col">
+            <div className="flex items-center justify-between px-6 py-4 border-b border-gray-800 bg-[#13151f]">
+              <div className="flex items-center gap-2">
+                <Tv size={20} className="text-indigo-400" />
+                <h3 className="text-base font-bold text-white">Escolha o que deseja transmitir</h3>
+              </div>
+              <button
+                onClick={() => setIsPickerOpen(false)}
+                className="p-1 rounded-lg text-gray-400 hover:text-white hover:bg-gray-800 transition"
+              >
+                <X size={18} />
+              </button>
+            </div>
+
+            <div className="p-6 overflow-y-auto max-h-[60vh]">
+              <p className="text-xs text-gray-400 mb-4">
+                Selecione uma tela inteira ou janela aberta para compartilhar ao vivo com seus sócios:
+              </p>
+
+              <div className="grid grid-cols-2 gap-4">
+                {availableSources.map((source) => (
+                  <div
+                    key={source.id}
+                    onClick={() => selectScreenSource(source.id)}
+                    className="group bg-gray-900 border border-gray-700/80 hover:border-indigo-500 rounded-xl p-2.5 cursor-pointer transition flex flex-col gap-2 hover:scale-[1.02] shadow-lg"
+                  >
+                    <div className="aspect-video bg-black/60 rounded-lg overflow-hidden border border-gray-800 flex items-center justify-center">
+                      <img
+                        src={source.thumbnail}
+                        alt={source.name}
+                        className="w-full h-full object-contain"
+                      />
+                    </div>
+                    <span className="text-xs font-semibold text-gray-300 group-hover:text-indigo-300 truncate">
+                      {source.name}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

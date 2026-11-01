@@ -31,7 +31,7 @@ export interface PixelLayer {
   name: string;
   visible: boolean;
   opacity: number;
-  data: string[]; // array of hex colors or empty strings per frame
+  data: string[];
 }
 
 export interface WhiteboardElement {
@@ -58,5 +58,21 @@ export interface GameBackup {
   date: string;
   size: string;
   fileName: string;
-  fileData?: string; // Data URL for local backup storage or remote link
+  fileData?: string;
+}
+
+export interface ScreenSource {
+  id: string;
+  name: string;
+  thumbnail: string;
+}
+
+declare global {
+  interface Window {
+    electronAPI?: {
+      getScreenSources: () => Promise<ScreenSource[]>;
+      openFileDialog: () => Promise<{ canceled: boolean; filePaths: string[] }>;
+      isElectron?: boolean;
+    };
+  }
 }

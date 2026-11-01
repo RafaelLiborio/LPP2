@@ -30,10 +30,19 @@ export const Navigation: React.FC<NavigationProps> = ({
       <div className="flex flex-col items-center gap-3 w-full">
         <button
           onClick={() => setActiveTab('discord')}
-          title="LPP2 Game Hub"
-          className="w-12 h-12 rounded-2xl bg-gradient-to-tr from-indigo-600 to-violet-500 flex items-center justify-center text-white font-extrabold text-sm shadow-lg shadow-indigo-600/30 hover:rounded-xl transition-all"
+          title="LPP2 Studio - Organizer Software"
+          className="w-13 h-13 rounded-2xl bg-indigo-950/60 border border-indigo-500/40 p-1 flex items-center justify-center shadow-lg shadow-indigo-600/30 hover:scale-105 transition-all overflow-hidden"
         >
-          LPP2
+          <img
+            src="./logo.png"
+            alt="LPP2 Studio"
+            className="w-full h-full object-contain"
+            style={{ imageRendering: 'pixelated' }}
+            onError={(e) => {
+              // fallback if path differs
+              (e.target as HTMLImageElement).src = '/logo.png';
+            }}
+          />
         </button>
 
         <div className="w-8 h-[2px] bg-gray-800 rounded-full" />

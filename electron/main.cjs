@@ -1,23 +1,41 @@
-const { app, BrowserWindow, ipcMain, desktopCapturer, dialog } = require('electron');
+const { app, BrowserWindow, ipcMain, desktopCapturer, dialog, session } = require('electron');
 const path = require('path');
 
 const isDev = process.env.NODE_ENV === 'development' || !app.isPackaged;
 
 function createWindow() {
+  const iconPath = path.join(__dirname, '../public/logo.png');
+
   const mainWindow = new BrowserWindow({
     width: 1360,
     height: 850,
     minWidth: 1024,
     minHeight: 700,
-    title: 'LPP2 - Game Dev Studio Hub',
+    title: 'LPP2 Studio - Organizer Software',
+    icon: iconPath,
     backgroundColor: '#0f1117',
     webPreferences: {
       preload: path.join(__dirname, 'preload.cjs'),
       nodeIntegration: false,
       contextIsolation: true,
-      webSecurity: false // Enables local file access and local streaming easily
+      webSecurity: false
     },
     autoHideMenuBar: true
+  });
+
+  // Enable getDisplayMedia in Electron 17+
+  session.defaultSession.setDisplayMediaRequestHandler(async (request, callback) => {
+    try {
+      const sources = await desktopCapturer.getSources({ types: ['screen', 'window'] });
+      if (sources && sources.length > 0) {
+        callback({ video: sources[0], audio: 'loopback' });
+      } else {
+        callback({});
+      }
+    } catch (e) {
+      console.error('DisplayMedia handler error:', e);
+      callback({});
+    }
   });
 
   if (isDev) {
@@ -28,10 +46,13 @@ function createWindow() {
   }
 }
 
-// IPC: get screen sources for screen sharing
+// IPC: get screen sources for screen sharing with thumbnail and title
 ipcMain.handle('get-screen-sources', async () => {
   try {
-    const sources = await desktopCapturer.getSources({ types: ['window', 'screen'] });
+    const sources = await desktopCapturer.getSources({
+      types: ['screen', 'window'],
+      thumbnailSize: { width: 320, height: 180 }
+    });
     return sources.map(source => ({
       id: source.id,
       name: source.name,

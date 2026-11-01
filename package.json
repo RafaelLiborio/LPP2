@@ -12,7 +12,28 @@
     "dev:electron": "wait-on tcp:5173 && cross-env NODE_ENV=development electron .",
     "dev:server": "node server/index.cjs",
     "build": "tsc -b && vite build",
+    "build:exe": "npm run build && electron-builder --win portable",
+    "dist": "npm run build && electron-builder",
     "preview": "vite preview"
+  },
+  "build": {
+    "appId": "com.lpp2.studio",
+    "productName": "LPP2 Studio",
+    "directories": {
+      "output": "release"
+    },
+    "files": [
+      "dist/**/*",
+      "electron/**/*",
+      "server/**/*",
+      "public/**/*",
+      "package.json"
+    ],
+    "win": {
+      "target": [
+        "portable"
+      ]
+    }
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.118.0",
@@ -35,6 +56,7 @@
     "concurrently": "^10.0.6",
     "cross-env": "^10.1.0",
     "electron": "^45.2.1",
+    "electron-builder": "^26.18.0",
     "oxlint": "^1.89.0",
     "tailwindcss": "^4.3.3",
     "typescript": "~7.0.2",
