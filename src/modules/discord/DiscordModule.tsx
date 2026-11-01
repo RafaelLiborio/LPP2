@@ -39,6 +39,8 @@ const ICE_SERVERS = {
   ]
 };
 
+const QUICK_EMOJIS = ['🎮', '👾', '🎨', '⚔️', '🛡️', '💎', '🚀', '🔥', '👍', '❤️', '💀', '🕹️', '🏆'];
+
 export const DiscordModule: React.FC = () => {
   const { socket, currentUser, setCurrentUser, onlineUsers, messages, sendMessage } = useSocket();
 
@@ -48,6 +50,7 @@ export const DiscordModule: React.FC = () => {
   const [isMuted, setIsMuted] = useState(false);
   const [isDeafened, setIsDeafened] = useState(false);
   const [isScreenSharing, setIsScreenSharing] = useState(false);
+  const [showEmojiPicker, setShowEmojiPicker] = useState(false);
 
   // WebRTC state
   const localStreamRef = useRef<MediaStream | null>(null);
@@ -55,6 +58,7 @@ export const DiscordModule: React.FC = () => {
   const peerConnections = useRef<Map<string, RTCPeerConnection>>(new Map());
   const [remoteStreams, setRemoteStreams] = useState<Map<string, { stream: MediaStream; username: string; isScreen?: boolean }>>(new Map());
 
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const activeChannel = CHANNELS.find((c) => c.id === activeChannelId) || CHANNELS[0];
   const channelMessages = messages.filter((m) => m.channelId === activeChannelId);
@@ -182,13 +186,11 @@ export const DiscordModule: React.FC = () => {
   // Join or Leave Voice Room
   const toggleVoiceRoom = async (channelId: string) => {
     if (inVoiceRoom === channelId) {
-      // Leave
       leaveVoiceRoom();
     } else {
       if (inVoiceRoom) {
         leaveVoiceRoom();
       }
-      // Join
       try {
         const audioStream = await navigator.mediaDevices.getUserMedia({ audio: true });
         localStreamRef.current = audioStream;
@@ -197,7 +199,7 @@ export const DiscordModule: React.FC = () => {
           socket.emit('join-voice', { roomId: channelId, user: currentUser });
         }
       } catch (err) {
-        console.warn('Could not acquire microphone, joining in listen-only mode:', err);
+        console.warn('Microfone indisponível ou permissão negada, entrando apenas para escuta:', err);
         setInVoiceRoom(channelId);
         if (socket) {
           socket.emit('join-voice', { roomId: channelId, user: currentUser });
@@ -245,7 +247,6 @@ export const DiscordModule: React.FC = () => {
         setIsScreenSharing(true);
         setCurrentUser({ ...currentUser, isScreenSharing: true });
 
-        // Add track to all active peer connections
         const videoTrack = screenStream.getVideoTracks()[0];
         videoTrack.onended = () => {
           setIsScreenSharing(false);
@@ -256,7 +257,7 @@ export const DiscordModule: React.FC = () => {
           pc.addTrack(videoTrack, screenStream);
         });
       } catch (err) {
-        console.error('Error starting screen share:', err);
+        console.error('Erro ao iniciar compartilhamento de tela:', err);
       }
     }
   };
@@ -281,10 +282,50 @@ export const DiscordModule: React.FC = () => {
     if (!inputText.trim()) return;
     sendMessage(inputText.trim(), activeChannelId);
     setInputText('');
+    setShowEmojiPicker(false);
   };
+
+  const handleImageFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = () => {
+      sendMessage('Enviou uma imagem/anexo:', activeChannelId, reader.result as string);
+    };
+    reader.readAsDataURL(file);
+    e.target.value = '';
+  };
+
+  // Check if any peer has an active video stream
+  const hasActiveVideoStreams = isScreenSharing || Array.from(remoteStreams.values()).some((s) => s.isScreen);
 
   return (
     <div className="flex w-full h-full bg-[#1e202a] text-gray-200 overflow-hidden select-none">
+      {/* Hidden Audio Elements for ALWAYS-WORKING WebRTC Voice */}
+      {Array.from(remoteStreams.entries()).map(([peerId, data]) => (
+        <audio
+          key={`audio-${peerId}`}
+          autoPlay
+          playsInline
+          muted={isDeafened}
+          ref={(audio) => {
+            if (audio && data.stream) {
+              audio.srcObject = data.stream;
+            }
+          }}
+        />
+      ))}
+
+      {/* Hidden File Input for Real Image Uploads */}
+      <input
+        type="file"
+        ref={fileInputRef}
+        accept="image/*"
+        onChange={handleImageFileSelect}
+        className="hidden"
+      />
+
       {/* 1. Sub-sidebar: Channels */}
       <div className="w-60 bg-[#161720] border-r border-gray-800/80 flex flex-col justify-between shrink-0">
         <div className="flex flex-col h-full overflow-hidden">
@@ -474,8 +515,8 @@ export const DiscordModule: React.FC = () => {
           </div>
         </div>
 
-        {/* Video / Screen Share Grid (if someone is streaming) */}
-        {(isScreenSharing || remoteStreams.size > 0) && (
+        {/* Video / Screen Share Grid (renders ONLY if someone is transmitting video/screen) */}
+        {hasActiveVideoStreams && (
           <div className="p-4 bg-black/40 border-b border-gray-800 grid grid-cols-1 md:grid-cols-2 gap-3 max-h-72 overflow-y-auto">
             {isScreenSharing && screenStreamRef.current && (
               <div className="relative rounded-xl overflow-hidden bg-gray-900 border border-indigo-500/50 aspect-video flex items-center justify-center">
@@ -497,23 +538,26 @@ export const DiscordModule: React.FC = () => {
               </div>
             )}
 
-            {Array.from(remoteStreams.entries()).map(([peerId, data]) => (
-              <div key={peerId} className="relative rounded-xl overflow-hidden bg-gray-900 border border-gray-700 aspect-video flex items-center justify-center">
-                <video
-                  autoPlay
-                  playsInline
-                  muted={isDeafened}
-                  ref={(video) => {
-                    if (video) video.srcObject = data.stream;
-                  }}
-                  className="w-full h-full object-contain"
-                />
-                <div className="absolute top-2 left-2 bg-black/60 px-2 py-0.5 rounded text-[11px] font-semibold text-white flex items-center gap-1.5">
-                  <Monitor size={12} className="text-emerald-400" />
-                  {data.username}
+            {Array.from(remoteStreams.entries()).map(([peerId, data]) => {
+              if (!data.isScreen) return null;
+              return (
+                <div key={peerId} className="relative rounded-xl overflow-hidden bg-gray-900 border border-gray-700 aspect-video flex items-center justify-center">
+                  <video
+                    autoPlay
+                    playsInline
+                    muted={isDeafened}
+                    ref={(video) => {
+                      if (video) video.srcObject = data.stream;
+                    }}
+                    className="w-full h-full object-contain"
+                  />
+                  <div className="absolute top-2 left-2 bg-black/60 px-2 py-0.5 rounded text-[11px] font-semibold text-white flex items-center gap-1.5">
+                    <Monitor size={12} className="text-emerald-400" />
+                    {data.username}
+                  </div>
                 </div>
-              </div>
-            ))}
+              );
+            })}
           </div>
         )}
 
@@ -523,7 +567,7 @@ export const DiscordModule: React.FC = () => {
             <div className="h-full flex flex-col items-center justify-center text-center text-gray-500 space-y-2">
               <Hash size={42} className="text-gray-600" />
               <p className="text-base font-semibold text-gray-300">Início do canal #{activeChannel.name}</p>
-              <p className="text-xs max-w-sm">Este é o começo da história desse canal. Compartilhe novidades, ideias de mecânicas e assets com seus sócios!</p>
+              <p className="text-xs max-w-sm">Compartilhe ideias de mecânicas, assets e notas de desenvolvimento com seus sócios!</p>
             </div>
           ) : (
             channelMessages.map((msg) => (
@@ -551,16 +595,31 @@ export const DiscordModule: React.FC = () => {
           <div ref={messagesEndRef} />
         </div>
 
-        {/* Message Input Box */}
-        <div className="p-4 bg-[#161720] border-t border-gray-800">
+        {/* Message Input Box with Real Image File Upload & Quick Emoji Bar */}
+        <div className="p-4 bg-[#161720] border-t border-gray-800 relative">
+          {showEmojiPicker && (
+            <div className="absolute bottom-16 left-6 bg-[#212330] border border-gray-700 rounded-xl p-2.5 shadow-2xl flex items-center gap-1.5 z-30">
+              {QUICK_EMOJIS.map((emoji) => (
+                <button
+                  key={emoji}
+                  type="button"
+                  onClick={() => {
+                    setInputText((prev) => prev + ' ' + emoji);
+                    setShowEmojiPicker(false);
+                  }}
+                  className="hover:scale-125 transition text-lg p-1"
+                >
+                  {emoji}
+                </button>
+              ))}
+            </div>
+          )}
+
           <form onSubmit={handleSendMessage} className="flex items-center gap-2 bg-[#212330] rounded-xl px-4 py-2 border border-gray-700/70 focus-within:border-indigo-500 transition">
             <button
               type="button"
-              title="Anexar imagem ou arte"
-              onClick={() => {
-                const url = prompt('Cole a URL da imagem ou anexo:');
-                if (url) sendMessage('Enviou um asset:', activeChannelId, url);
-              }}
+              title="Anexar imagem ou sprite do computador"
+              onClick={() => fileInputRef.current?.click()}
               className="text-gray-400 hover:text-white transition"
             >
               <Image size={18} />
@@ -576,8 +635,9 @@ export const DiscordModule: React.FC = () => {
 
             <button
               type="button"
-              onClick={() => setInputText((prev) => prev + ' 🎮')}
-              className="text-gray-400 hover:text-white transition"
+              onClick={() => setShowEmojiPicker(!showEmojiPicker)}
+              title="Emojis de Game Dev"
+              className={`transition ${showEmojiPicker ? 'text-indigo-400' : 'text-gray-400 hover:text-white'}`}
             >
               <Smile size={18} />
             </button>

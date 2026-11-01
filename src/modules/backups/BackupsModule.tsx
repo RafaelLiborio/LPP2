@@ -86,7 +86,15 @@ export const BackupsModule: React.FC = () => {
       a.download = backup.fileName;
       a.click();
     } else {
-      alert(`Iniciando download do pacote: ${backup.fileName}`);
+      const blob = new Blob([
+        `Pacote LPP2 - Build: ${backup.title}\nVersão: ${backup.version}\nAutor: ${backup.author}\nData: ${backup.date}\n\nChangelog:\n${backup.notes}`
+      ], { type: 'text/plain;charset=utf-8' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `${backup.fileName}_info.txt`;
+      a.click();
+      URL.revokeObjectURL(url);
     }
   };
 
