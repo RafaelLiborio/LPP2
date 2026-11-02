@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { useSocket } from '../../context/SocketContext';
 import type { GameBackup } from '../../types';
+import { resolveProjectFileUrl } from '../../services/supabase';
 import {
   Package,
   Upload,
@@ -16,7 +17,7 @@ import {
 } from 'lucide-react';
 
 export const BackupsModule: React.FC = () => {
-  const { backups, addBackup, sendMessage } = useSocket();
+  const { backups, addBackup, sendMessage, isTeamMember } = useSocket();
 
   const [searchTerm, setSearchTerm] = useState('');
   const [isModalOpen, setIsModalOpen] = useState(false);
@@ -27,7 +28,8 @@ export const BackupsModule: React.FC = () => {
   const [notes, setNotes] = useState('');
   const [fileName, setFileName] = useState('');
   const [fileSize, setFileSize] = useState('');
-  const [fileData, setFileData] = useState<string | null>(null);
+  const [selectedFile, setSelectedFile] = useState<File | null>(null);
+  const [fileError, setFileError] = useState('');
 
   const filteredBackups = backups.filter(
     (b) =>
@@ -40,51 +42,69 @@ export const BackupsModule: React.FC = () => {
     const file = e.target.files?.[0];
     if (!file) return;
 
+    const maxSize = isTeamMember ? 50 * 1024 * 1024 : 6 * 1024 * 1024;
+    if (file.size > maxSize) {
+      setFileError(`O limite para esta conexão é ${isTeamMember ? '50 MB' : '6 MB'}. Entre em uma conta autorizada do Supabase para enviar arquivos maiores.`);
+      setFileName('');
+      setFileSize('');
+      setSelectedFile(null);
+      e.target.value = '';
+      return;
+    }
+
+    setFileError('');
     setFileName(file.name);
     const sizeMb = (file.size / (1024 * 1024)).toFixed(1);
     setFileSize(`${sizeMb} MB`);
-
-    const reader = new FileReader();
-    reader.onload = () => {
-      setFileData(reader.result as string);
-    };
-    reader.readAsDataURL(file);
+    setSelectedFile(file);
   };
 
-  const handleCreateBackup = (e: React.FormEvent) => {
+  const handleCreateBackup = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!title.trim() || !version.trim()) return;
 
-    const newBackup: Partial<GameBackup> = {
+    const newBackup: Partial<GameBackup> & { file?: File } = {
       version: version.trim(),
       title: title.trim(),
       notes: notes.trim(),
       fileName: fileName || `LPP2_Build_${version.trim()}.zip`,
       size: fileSize || '15.4 MB',
-      fileData: fileData || undefined
+      file: selectedFile || undefined
     };
 
-    addBackup(newBackup);
+    const saved = await addBackup(newBackup);
+    if (!saved) {
+      setFileError('Não foi possível publicar. Verifique a conexão, sua sessão e as políticas do Supabase.');
+      return;
+    }
 
     // Notify team in general chat
-    sendMessage(
+    const notified = await sendMessage(
       `🚀 Nova build do jogo publicada: **${version.trim()} - ${title.trim()}**! Verifique a aba de Backups para baixar e testar.`,
       'geral'
     );
 
+    if (!notified) setFileError('Build salva, mas não foi possível avisar o canal.');
     setIsModalOpen(false);
     setTitle('');
     setNotes('');
     setFileName('');
-    setFileData(null);
+    setSelectedFile(null);
   };
 
-  const handleDownload = (backup: GameBackup) => {
+  const handleDownload = async (backup: GameBackup) => {
     if (backup.fileData) {
-      const a = document.createElement('a');
-      a.href = backup.fileData;
-      a.download = backup.fileName;
-      a.click();
+      try {
+        const url = await resolveProjectFileUrl(backup.fileData, backup.fileName);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = backup.fileName;
+        a.target = '_blank';
+        a.rel = 'noopener noreferrer';
+        a.click();
+      } catch (error) {
+        setFileError(error instanceof Error ? error.message : 'Falha ao baixar o arquivo.');
+      }
     } else {
       const blob = new Blob([
         `Pacote LPP2 - Build: ${backup.title}\nVersão: ${backup.version}\nAutor: ${backup.author}\nData: ${backup.date}\n\nChangelog:\n${backup.notes}`
@@ -125,7 +145,7 @@ export const BackupsModule: React.FC = () => {
           </div>
 
           <button
-            onClick={() => setIsModalOpen(true)}
+            onClick={() => { setFileError(''); setIsModalOpen(true); }}
             className="px-4 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-semibold text-xs flex items-center gap-1.5 shadow-lg shadow-indigo-600/20 transition"
           >
             <Plus size={15} />
@@ -136,6 +156,7 @@ export const BackupsModule: React.FC = () => {
 
       {/* Main Backups List */}
       <div className="flex-1 overflow-y-auto p-8 space-y-4">
+        {fileError && !isModalOpen && <div className="rounded-lg border border-rose-500/30 bg-rose-500/10 px-4 py-3 text-xs text-rose-200">{fileError}</div>}
         {filteredBackups.length === 0 ? (
           <div className="h-full flex flex-col items-center justify-center text-center text-gray-500 space-y-3">
             <FileArchive size={52} className="text-gray-600" />
@@ -256,6 +277,7 @@ export const BackupsModule: React.FC = () => {
                   <input
                     type="file"
                     onChange={handleFileSelect}
+                    accept=".zip,.rar,.7z,.exe,.apk,.unitypackage"
                     className="absolute inset-0 opacity-0 cursor-pointer"
                   />
                   <Upload size={24} className="mx-auto text-gray-500 mb-1.5" />
@@ -263,7 +285,7 @@ export const BackupsModule: React.FC = () => {
                     {fileName ? fileName : 'Clique para selecionar o arquivo da build'}
                   </p>
                   <p className="text-[10px] text-gray-500 mt-0.5">
-                    {fileSize ? `Tamanho: ${fileSize}` : 'Zip, Executável ou Pacote de Assets'}
+                    {fileError || (fileSize ? `Tamanho: ${fileSize}` : `Zip, executável ou assets (máximo ${isTeamMember ? '50' : '6'} MB)`)}
                   </p>
                 </div>
               </div>

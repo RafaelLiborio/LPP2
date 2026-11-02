@@ -50,7 +50,7 @@ E acesse `http://localhost:5173`.
 
 ### 4. 📦 Módulo de Backups & Builds do Jogo
 - Histórico completo de versões (`v0.1.0-alpha`, etc.), títulos e changelogs.
-- Upload de arquivos de projeto (`.zip`, `.exe`, `.rar`, assets).
+- Upload de arquivos de projeto (`.zip`, `.exe`, `.rar`, assets) com limite de 50 MB usando Supabase Storage.
 - Download e restauração direta de builds.
 
 ### 5. 🛡️ Sistema de Identidade & Perfil
@@ -65,3 +65,22 @@ Para permitir que seus sócios se conectem de casas diferentes sem precisar de p
 1. Suba o arquivo `server/index.cjs` e `package.json` para o **Render.com** como um *Web Service Gratuito*.
 2. No app, clique na engrenagem no canto inferior esquerdo e cole a URL do seu Render (ex: `https://meu-lpp2-server.onrender.com`).
 3. O WebRTC continuará 100% gratuito e direto (P2P), usando apenas a nuvem para sinalização inicial.
+4. No painel do serviço, defina `SUPABASE_URL`, `SUPABASE_PUBLIC_KEY` e `REQUIRE_SOCKET_AUTH=true`. Use o mesmo projeto e a mesma chave publishable/anon configurados no app. Sem essas variáveis o servidor de produção rejeita conexões.
+5. Use uma URL HTTPS para o servidor remoto. O app só permite HTTP em `localhost`, pois a sessão Supabase é enviada ao servidor para validar a equipe.
+
+## 🔐 Configuração segura do Supabase
+
+1. No app, informe a URL do projeto e a chave **publishable/anon**. Nunca use uma chave `service_role` ou `secret` no app.
+2. No SQL Editor do Supabase, execute `supabase_schema.sql`. O script pode ser executado novamente e substitui as políticas antigas de acesso público.
+3. Autorize os e-mails da equipe no SQL Editor, antes de criar as contas. Exemplo:
+
+```sql
+INSERT INTO public.lpp2_allowed_emails (email)
+VALUES (lower('pessoa@exemplo.com'))
+ON CONFLICT (email) DO NOTHING;
+```
+
+4. Em **Configurações & Conexão → Banco Supabase**, cada pessoa cria sua conta com um e-mail autorizado. Se a confirmação por e-mail estiver ligada no Supabase, ela precisa confirmar o endereço antes de entrar.
+5. O script cria o bucket privado `lpp2-files`. Mensagens, quadro, builds e arquivos ficam disponíveis somente para e-mails autorizados; uploads podem ter até 50 MB.
+
+O modo alternativo sem login funciona apenas no desenvolvimento local. O histórico desse modo fica na memória e se perde quando o processo reinicia. Em produção, o servidor Socket.IO valida a sessão e a lista de e-mails permitidos no Supabase.

@@ -377,11 +377,8 @@ export const WhiteboardModule: React.FC = () => {
   // Undo last element
   const handleUndo = () => {
     if (whiteboardElements.length === 0) return;
-    sendWhiteboardAction({
-      type: 'add',
-      element: undefined
-    });
-    renderBoard();
+    const lastElement = whiteboardElements[whiteboardElements.length - 1];
+    void sendWhiteboardAction({ type: 'remove', elementId: lastElement.id });
   };
 
   const handleModalSubmit = (e: React.FormEvent) => {

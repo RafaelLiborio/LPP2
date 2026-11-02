@@ -67,12 +67,40 @@ export interface ScreenSource {
   thumbnail: string;
 }
 
+export interface UpdateInfo {
+  version: string;
+  releaseDate?: string;
+  releaseNotes?: string;
+  downloadUrl?: string;
+  mandatory?: boolean;
+}
+
+export interface UpdateProgress {
+  percent: number;
+  transferred: number;
+  total: number;
+  bytesPerSecond: number;
+}
+
+export interface UpdateStatusPayload {
+  type: 'checking' | 'available' | 'not-available' | 'downloading' | 'downloaded' | 'error';
+  info?: UpdateInfo;
+  progress?: UpdateProgress;
+  error?: string;
+}
+
 declare global {
   interface Window {
     electronAPI?: {
       getScreenSources: () => Promise<ScreenSource[]>;
       openFileDialog: () => Promise<{ canceled: boolean; filePaths: string[] }>;
       isElectron?: boolean;
+      getAppVersion?: () => Promise<string>;
+      checkForUpdates?: () => Promise<{ available: boolean; updateInfo?: UpdateInfo; currentVersion?: string; error?: string }>;
+      startUpdateDownload?: () => Promise<{ success: boolean; error?: string }>;
+      installUpdate?: () => Promise<void>;
+      openExternalUrl?: (url: string) => Promise<void>;
+      onUpdateStatus?: (callback: (payload: UpdateStatusPayload) => void) => () => void;
     };
   }
 }

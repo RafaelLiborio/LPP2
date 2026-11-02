@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useSocket } from '../../context/SocketContext';
+import { resolveProjectFileUrl } from '../../services/supabase';
 import {
   Hash,
   Volume2,
@@ -15,7 +16,10 @@ import {
   Shield,
   CircleDot,
   X,
-  Tv
+  Tv,
+  Maximize2,
+  Minimize2,
+  VolumeX
 } from 'lucide-react';
 import type { ScreenSource } from '../../types';
 
@@ -42,6 +46,18 @@ const ICE_SERVERS = {
   ]
 };
 
+const AttachmentImage: React.FC<{ fileRef: string }> = ({ fileRef }) => {
+  const [src, setSrc] = useState('');
+  useEffect(() => {
+    let active = true;
+    void resolveProjectFileUrl(fileRef)
+      .then((url) => { if (active) setSrc(url); })
+      .catch((error) => console.warn('Não foi possível carregar o anexo:', error));
+    return () => { active = false; };
+  }, [fileRef]);
+  return src ? <img src={src} alt="Anexo" className="w-full h-auto object-contain bg-black/30" /> : <div className="p-3 text-xs text-gray-400">Carregando anexo…</div>;
+};
+
 const QUICK_EMOJIS = ['🎮', '👾', '🎨', '⚔️', '🛡️', '💎', '🚀', '🔥', '👍', '❤️', '💀', '🕹️', '🏆'];
 
 export const DiscordModule: React.FC = () => {
@@ -64,6 +80,89 @@ export const DiscordModule: React.FC = () => {
   const screenStreamRef = useRef<MediaStream | null>(null);
   const peerConnections = useRef<Map<string, RTCPeerConnection>>(new Map());
   const [remoteStreams, setRemoteStreams] = useState<Map<string, { stream: MediaStream; username: string; isScreen?: boolean }>>(new Map());
+
+  // Screen share fullscreen state
+  const [fullscreenStream, setFullscreenStream] = useState<{
+    id: string;
+    stream: MediaStream;
+    username: string;
+    isLocal: boolean;
+  } | null>(null);
+  const [isMonitorFullscreen, setIsMonitorFullscreen] = useState(false);
+  const [streamAudioMuted, setStreamAudioMuted] = useState(false);
+  const [streamVolume, setStreamVolume] = useState(1);
+  const [showFullscreenControls, setShowFullscreenControls] = useState(true);
+  const controlsTimeoutRef = useRef<any>(null);
+  const fullscreenContainerRef = useRef<HTMLDivElement>(null);
+
+  const openFullscreenStream = (id: string, stream: MediaStream, username: string, isLocal: boolean) => {
+    setFullscreenStream({ id, stream, username, isLocal });
+    setShowFullscreenControls(true);
+    setTimeout(() => {
+      if (fullscreenContainerRef.current && !document.fullscreenElement) {
+        fullscreenContainerRef.current.requestFullscreen().catch(() => {});
+      }
+    }, 50);
+  };
+
+  const closeFullscreenStream = async () => {
+    if (document.fullscreenElement) {
+      try {
+        await document.exitFullscreen();
+      } catch (e) {}
+    }
+    setFullscreenStream(null);
+  };
+
+  const toggleNativeMonitorFullscreen = async () => {
+    if (!document.fullscreenElement) {
+      if (fullscreenContainerRef.current) {
+        try {
+          await fullscreenContainerRef.current.requestFullscreen();
+        } catch (e) {
+          console.warn('requestFullscreen error:', e);
+        }
+      }
+    } else {
+      try {
+        await document.exitFullscreen();
+      } catch (e) {}
+    }
+  };
+
+  const handleFullscreenMouseMove = () => {
+    setShowFullscreenControls(true);
+    if (controlsTimeoutRef.current) {
+      clearTimeout(controlsTimeoutRef.current);
+    }
+    controlsTimeoutRef.current = setTimeout(() => {
+      setShowFullscreenControls(false);
+    }, 3500);
+  };
+
+  // Synchronize fullscreenchange and ESC/F keys
+  useEffect(() => {
+    const handleFullscreenChange = () => {
+      setIsMonitorFullscreen(!!document.fullscreenElement);
+    };
+
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape' && fullscreenStream) {
+        closeFullscreenStream();
+      }
+      if ((e.key === 'f' || e.key === 'F') && fullscreenStream) {
+        toggleNativeMonitorFullscreen();
+      }
+    };
+
+    document.addEventListener('fullscreenchange', handleFullscreenChange);
+    window.addEventListener('keydown', handleKeyDown);
+
+    return () => {
+      document.removeEventListener('fullscreenchange', handleFullscreenChange);
+      window.removeEventListener('keydown', handleKeyDown);
+    };
+  }, [fullscreenStream]);
 
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
@@ -154,6 +253,9 @@ export const DiscordModule: React.FC = () => {
         next.delete(peerId);
         return next;
       });
+      if (fullscreenStream?.id === peerId) {
+        closeFullscreenStream();
+      }
     });
 
     return () => {
@@ -238,6 +340,9 @@ export const DiscordModule: React.FC = () => {
     }
     setIsScreenSharing(false);
     setCurrentUser({ ...currentUser, isScreenSharing: false });
+    if (fullscreenStream?.id === 'local') {
+      closeFullscreenStream();
+    }
   };
 
   // Toggle Screen Share
@@ -332,20 +437,28 @@ export const DiscordModule: React.FC = () => {
   const handleSendMessage = (e: React.FormEvent) => {
     e.preventDefault();
     if (!inputText.trim()) return;
-    sendMessage(inputText.trim(), activeChannelId);
-    setInputText('');
-    setShowEmojiPicker(false);
+    const content = inputText.trim();
+    void sendMessage(content, activeChannelId).then((saved) => {
+      if (saved) {
+        setInputText('');
+        setShowEmojiPicker(false);
+      } else {
+        window.alert('Não foi possível enviar. Entre no Supabase ou verifique a conexão do servidor.');
+      }
+    });
   };
 
   const handleImageFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
-
-    const reader = new FileReader();
-    reader.onload = () => {
-      sendMessage('Enviou uma imagem/anexo:', activeChannelId, reader.result as string);
-    };
-    reader.readAsDataURL(file);
+    if (!['image/png', 'image/jpeg', 'image/gif', 'image/webp'].includes(file.type)) {
+      window.alert('Use uma imagem PNG, JPEG, GIF ou WebP.');
+      e.target.value = '';
+      return;
+    }
+    void sendMessage('Enviou uma imagem/anexo:', activeChannelId, file).then((saved) => {
+      if (!saved) window.alert('Não foi possível enviar. Entre no Supabase ou verifique a conexão do servidor.');
+    });
     e.target.value = '';
   };
 
@@ -591,7 +704,11 @@ export const DiscordModule: React.FC = () => {
         {hasActiveVideoStreams && (
           <div className="p-4 bg-black/40 border-b border-gray-800 grid grid-cols-1 md:grid-cols-2 gap-3 max-h-72 overflow-y-auto">
             {isScreenSharing && screenStreamRef.current && (
-              <div className="relative rounded-xl overflow-hidden bg-gray-900 border border-indigo-500/50 aspect-video flex items-center justify-center">
+              <div
+                className="group relative rounded-xl overflow-hidden bg-gray-900 border border-indigo-500/50 aspect-video flex items-center justify-center cursor-pointer shadow-md hover:border-indigo-400 transition"
+                onDoubleClick={() => openFullscreenStream('local', screenStreamRef.current!, currentUser.username, true)}
+                title="Clique duas vezes ou no botão para Tela Cheia"
+              >
                 <video
                   autoPlay
                   muted
@@ -603,9 +720,33 @@ export const DiscordModule: React.FC = () => {
                   }}
                   className="w-full h-full object-contain"
                 />
-                <div className="absolute top-2 left-2 bg-black/60 px-2 py-0.5 rounded text-[11px] font-semibold text-white flex items-center gap-1.5">
-                  <Monitor size={12} className="text-indigo-400" />
-                  Sua Transmissão
+
+                {/* Top overlay controls */}
+                <div className="absolute top-2 left-2 right-2 flex items-center justify-between pointer-events-none">
+                  <div className="bg-black/75 px-2 py-0.5 rounded text-[11px] font-semibold text-white flex items-center gap-1.5 border border-gray-700/60 shadow">
+                    <Monitor size={12} className="text-indigo-400" />
+                    Sua Transmissão
+                  </div>
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      openFullscreenStream('local', screenStreamRef.current!, currentUser.username, true);
+                    }}
+                    title="Entrar em Tela Cheia"
+                    className="pointer-events-auto bg-black/80 hover:bg-indigo-600 text-white px-2 py-1 rounded-lg text-xs font-semibold flex items-center gap-1 border border-gray-700 transition shadow"
+                  >
+                    <Maximize2 size={12} />
+                    <span>Tela Cheia</span>
+                  </button>
+                </div>
+
+                {/* Hover overlay hint */}
+                <div className="absolute inset-0 bg-black/30 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center pointer-events-none">
+                  <div className="bg-black/85 border border-gray-700 text-white text-xs px-3 py-1.5 rounded-xl font-medium flex items-center gap-1.5 shadow-xl">
+                    <Maximize2 size={13} className="text-indigo-400" />
+                    Clique duplo para Tela Cheia
+                  </div>
                 </div>
               </div>
             )}
@@ -613,7 +754,12 @@ export const DiscordModule: React.FC = () => {
             {Array.from(remoteStreams.entries()).map(([peerId, data]) => {
               if (!data.isScreen) return null;
               return (
-                <div key={peerId} className="relative rounded-xl overflow-hidden bg-gray-900 border border-gray-700 aspect-video flex items-center justify-center">
+                <div
+                  key={peerId}
+                  className="group relative rounded-xl overflow-hidden bg-gray-900 border border-gray-700 hover:border-emerald-500/80 aspect-video flex items-center justify-center cursor-pointer shadow-md transition"
+                  onDoubleClick={() => openFullscreenStream(peerId, data.stream, data.username, false)}
+                  title="Clique duas vezes ou no botão para Tela Cheia"
+                >
                   <video
                     autoPlay
                     playsInline
@@ -623,9 +769,33 @@ export const DiscordModule: React.FC = () => {
                     }}
                     className="w-full h-full object-contain"
                   />
-                  <div className="absolute top-2 left-2 bg-black/60 px-2 py-0.5 rounded text-[11px] font-semibold text-white flex items-center gap-1.5">
-                    <Monitor size={12} className="text-emerald-400" />
-                    {data.username}
+
+                  {/* Top overlay controls */}
+                  <div className="absolute top-2 left-2 right-2 flex items-center justify-between pointer-events-none">
+                    <div className="bg-black/75 px-2 py-0.5 rounded text-[11px] font-semibold text-white flex items-center gap-1.5 border border-gray-700/60 shadow">
+                      <Monitor size={12} className="text-emerald-400" />
+                      {data.username}
+                    </div>
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        openFullscreenStream(peerId, data.stream, data.username, false);
+                      }}
+                      title="Entrar em Tela Cheia"
+                      className="pointer-events-auto bg-black/80 hover:bg-emerald-600 text-white px-2 py-1 rounded-lg text-xs font-semibold flex items-center gap-1 border border-gray-700 transition shadow"
+                    >
+                      <Maximize2 size={12} />
+                      <span>Tela Cheia</span>
+                    </button>
+                  </div>
+
+                  {/* Hover overlay hint */}
+                  <div className="absolute inset-0 bg-black/30 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center pointer-events-none">
+                    <div className="bg-black/85 border border-gray-700 text-white text-xs px-3 py-1.5 rounded-xl font-medium flex items-center gap-1.5 shadow-xl">
+                      <Maximize2 size={13} className="text-emerald-400" />
+                      Clique duplo para Tela Cheia
+                    </div>
                   </div>
                 </div>
               );
@@ -657,7 +827,7 @@ export const DiscordModule: React.FC = () => {
                   </p>
                   {msg.fileUrl && (
                     <div className="mt-2 max-w-md rounded-lg overflow-hidden border border-gray-700">
-                      <img src={msg.fileUrl} alt="Anexo" className="w-full h-auto object-contain bg-black/30" />
+                      <AttachmentImage fileRef={msg.fileUrl} />
                     </div>
                   )}
                 </div>
@@ -804,6 +974,155 @@ export const DiscordModule: React.FC = () => {
                   </div>
                 ))}
               </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Fullscreen Video / Screen Share Overlay */}
+      {fullscreenStream && (
+        <div
+          ref={fullscreenContainerRef}
+          onMouseMove={handleFullscreenMouseMove}
+          className="fixed inset-0 z-50 bg-[#08090d] flex flex-col items-center justify-center overflow-hidden select-none animate-in fade-in duration-200"
+        >
+          {/* Top Bar Overlay */}
+          <div
+            className={`absolute top-0 left-0 right-0 p-4 bg-gradient-to-b from-black/90 via-black/40 to-transparent flex items-center justify-between z-20 transition-opacity duration-300 ${
+              showFullscreenControls ? 'opacity-100 pointer-events-auto' : 'opacity-0 pointer-events-none'
+            }`}
+          >
+            <div className="flex items-center gap-3">
+              <span className="flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-rose-600/30 border border-rose-500/50 text-rose-300 text-xs font-bold uppercase tracking-wider">
+                <span className="w-2 h-2 rounded-full bg-rose-500 animate-ping" />
+                Ao Vivo
+              </span>
+              <div>
+                <h3 className="font-bold text-white text-sm flex items-center gap-2">
+                  <Monitor size={16} className="text-indigo-400" />
+                  {fullscreenStream.isLocal ? 'Sua Transmissão de Tela' : `Transmissão de ${fullscreenStream.username}`}
+                </h3>
+                <p className="text-[11px] text-gray-400">Modo Tela Cheia • Pressione ESC ou F para alternar</p>
+              </div>
+            </div>
+
+            <div className="flex items-center gap-2">
+              <button
+                onClick={toggleNativeMonitorFullscreen}
+                title={isMonitorFullscreen ? 'Sair do Monitor Cheio (F)' : 'Expandir para Monitor Inteiro (F)'}
+                className="p-2 rounded-xl bg-gray-800/80 hover:bg-gray-700 text-white transition border border-gray-700/60 shadow-lg flex items-center gap-1.5 text-xs font-medium"
+              >
+                {isMonitorFullscreen ? <Minimize2 size={16} /> : <Maximize2 size={16} />}
+                <span>{isMonitorFullscreen ? 'Reduzir Janela' : 'Monitor Inteiro'}</span>
+              </button>
+              <button
+                onClick={closeFullscreenStream}
+                title="Sair da Tela Cheia (ESC)"
+                className="p-2 rounded-xl bg-gray-800/80 hover:bg-rose-600 text-white transition border border-gray-700/60 shadow-lg flex items-center gap-1.5 text-xs font-medium"
+              >
+                <X size={18} />
+                <span>Sair (ESC)</span>
+              </button>
+            </div>
+          </div>
+
+          {/* Video Canvas with Double-click toggle */}
+          <div
+            className="w-full h-full flex items-center justify-center cursor-pointer relative"
+            onDoubleClick={toggleNativeMonitorFullscreen}
+          >
+            <video
+              autoPlay
+              playsInline
+              muted={fullscreenStream.isLocal || streamAudioMuted || isDeafened}
+              ref={(video) => {
+                if (video && fullscreenStream.stream) {
+                  video.srcObject = fullscreenStream.stream;
+                  video.volume = streamVolume;
+                }
+              }}
+              className="w-full h-full object-contain"
+            />
+          </div>
+
+          {/* Floating Bottom Control Dock */}
+          <div
+            className={`absolute bottom-6 z-20 transition-opacity duration-300 ${
+              showFullscreenControls ? 'opacity-100 pointer-events-auto' : 'opacity-0 pointer-events-none'
+            }`}
+          >
+            <div className="bg-[#141622]/90 backdrop-blur-md border border-gray-700/80 rounded-2xl px-5 py-3 shadow-2xl flex items-center gap-4">
+              <div className="flex items-center gap-2.5 text-xs">
+                <div className="w-8 h-8 rounded-full bg-gray-800 border border-gray-700 flex items-center justify-center text-sm shadow">
+                  {fullscreenStream.isLocal ? currentUser.avatar : '👾'}
+                </div>
+                <div>
+                  <span className="font-bold text-white block leading-tight">
+                    {fullscreenStream.isLocal ? `${currentUser.username} (Você)` : fullscreenStream.username}
+                  </span>
+                  <span className="text-[10px] text-gray-400">Transmitindo ao vivo</span>
+                </div>
+              </div>
+
+              <div className="w-[1px] h-6 bg-gray-700/60" />
+
+              {/* Audio controls for remote streams */}
+              {!fullscreenStream.isLocal && (
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={() => setStreamAudioMuted(!streamAudioMuted)}
+                    className={`p-1.5 rounded-lg transition ${
+                      streamAudioMuted ? 'text-rose-400 bg-rose-500/10' : 'text-gray-300 hover:text-white hover:bg-gray-800'
+                    }`}
+                    title={streamAudioMuted ? 'Desmutar Transmissão' : 'Mutar Transmissão'}
+                  >
+                    {streamAudioMuted ? <VolumeX size={16} /> : <Volume2 size={16} />}
+                  </button>
+                  <input
+                    type="range"
+                    min="0"
+                    max="1"
+                    step="0.05"
+                    value={streamAudioMuted ? 0 : streamVolume}
+                    onChange={(e) => {
+                      setStreamVolume(parseFloat(e.target.value));
+                      setStreamAudioMuted(false);
+                    }}
+                    className="w-20 accent-indigo-500 h-1.5 bg-gray-700 rounded-lg cursor-pointer"
+                    title={`Volume: ${Math.round(streamVolume * 100)}%`}
+                  />
+                </div>
+              )}
+
+              {/* Local stream stop button */}
+              {fullscreenStream.isLocal && (
+                <button
+                  onClick={() => {
+                    stopScreenStream();
+                    closeFullscreenStream();
+                  }}
+                  className="px-3 py-1.5 rounded-xl bg-rose-600 hover:bg-rose-500 text-white font-bold text-xs transition flex items-center gap-1.5 shadow-md shadow-rose-600/30"
+                >
+                  <Monitor size={14} />
+                  Parar Transmissão
+                </button>
+              )}
+
+              <button
+                onClick={toggleNativeMonitorFullscreen}
+                className="px-3 py-1.5 rounded-xl bg-gray-800 hover:bg-gray-700 text-white font-medium text-xs transition flex items-center gap-1.5"
+              >
+                {isMonitorFullscreen ? <Minimize2 size={14} /> : <Maximize2 size={14} />}
+                {isMonitorFullscreen ? 'Janela' : 'Monitor Cheio'}
+              </button>
+
+              <button
+                onClick={closeFullscreenStream}
+                className="px-3.5 py-1.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-xs transition flex items-center gap-1.5 shadow-md shadow-indigo-600/30"
+              >
+                <X size={14} />
+                Sair da Tela Cheia
+              </button>
             </div>
           </div>
         </div>

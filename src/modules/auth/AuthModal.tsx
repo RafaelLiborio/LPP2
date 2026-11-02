@@ -1,17 +1,18 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useSocket } from '../../context/SocketContext';
 import type { UserProfile } from '../../types';
-import { X, Server, Check, Shield, Database, User, AlertCircle, Copy } from 'lucide-react';
+import { X, Server, Check, Shield, Database, User, AlertCircle, Copy, Sparkles, RefreshCw } from 'lucide-react';
 
 interface AuthModalProps {
   isOpen: boolean;
   onClose: () => void;
+  onOpenUpdates?: () => void;
 }
 
 const AVATAR_OPTIONS = ['👾', '🎮', '🧙‍♂️', '⚔️', '🏹', '🎨', '🕹️', '🛡️', '🐉', '🤖', '💀', '💎'];
 const ROLES: UserProfile['role'][] = ['Diretor', 'Programador', 'Artista 2D', 'Game Designer', 'Músico'];
 
-export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose }) => {
+export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose, onOpenUpdates }) => {
   const {
     currentUser,
     setCurrentUser,
@@ -20,11 +21,26 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose }) => {
     serverConnected,
     supabaseConnected,
     saveSupabaseConfig,
+    isAuthenticated,
+    isTeamMember,
+    authEmail,
+    signIn,
+    signUp,
+    signOut,
     supabaseUrl: currentSbUrl,
     supabaseAnonKey: currentSbKey
   } = useSocket();
 
-  const [activeTab, setActiveTab] = useState<'profile' | 'supabase' | 'server'>('profile');
+  const [activeTab, setActiveTab] = useState<'profile' | 'supabase' | 'server' | 'updates'>('profile');
+  const [appVersion, setAppVersion] = useState('1.0.0');
+
+  useEffect(() => {
+    if (window.electronAPI?.getAppVersion) {
+      window.electronAPI.getAppVersion().then(v => {
+        if (v) setAppVersion(v);
+      });
+    }
+  }, []);
 
   // Profile Form
   const [username, setUsername] = useState(currentUser.username);
@@ -36,6 +52,11 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose }) => {
   const [sbKey, setSbKey] = useState(currentSbKey);
   const [testingSupabase, setTestingSupabase] = useState(false);
   const [supabaseTestMsg, setSupabaseTestMsg] = useState<{ success: boolean; text: string } | null>(null);
+  const [authMode, setAuthMode] = useState<'signin' | 'signup'>('signin');
+  const [accountEmail, setAccountEmail] = useState('');
+  const [accountPassword, setAccountPassword] = useState('');
+  const [authBusy, setAuthBusy] = useState(false);
+  const [authMessage, setAuthMessage] = useState<{ success: boolean; text: string } | null>(null);
 
   // Server Form
   const [customServerUrl, setCustomServerUrl] = useState(serverUrl);
@@ -61,8 +82,8 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose }) => {
     }, 700);
   };
 
-  const handleTestAndSaveSupabase = async (e: React.FormEvent) => {
-    e.preventDefault();
+  const handleTestAndSaveSupabase = async (e?: React.FormEvent) => {
+    e?.preventDefault();
     setTestingSupabase(true);
     setSupabaseTestMsg(null);
 
@@ -79,10 +100,25 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose }) => {
     }
   };
 
+  const handleAccountSubmit = async (e?: React.FormEvent) => {
+    e?.preventDefault();
+    setAuthBusy(true);
+    setAuthMessage(null);
+    const result = authMode === 'signin'
+      ? await signIn(accountEmail, accountPassword)
+      : await signUp(accountEmail, accountPassword);
+    setAuthMessage({ success: result.success, text: result.message });
+    setAuthBusy(false);
+    if (result.success && authMode === 'signin') setAccountPassword('');
+  };
+
   const handleSaveServer = (e: React.FormEvent) => {
     e.preventDefault();
     if (customServerUrl.trim()) {
-      setServerUrl(customServerUrl.trim());
+      if (!setServerUrl(customServerUrl.trim())) {
+        window.alert('Use HTTPS para servidores remotos. HTTP só é permitido para localhost.');
+        return;
+      }
       setSavedSuccess(true);
       setTimeout(() => {
         setSavedSuccess(false);
@@ -93,7 +129,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose }) => {
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/75 backdrop-blur-sm p-4">
-      <div className="w-full max-w-lg bg-[#181a24] border border-gray-700/80 rounded-2xl shadow-2xl overflow-hidden flex flex-col">
+      <div className="w-full max-w-lg max-h-[90vh] bg-[#181a24] border border-gray-700/80 rounded-2xl shadow-2xl overflow-hidden flex flex-col">
         {/* Header */}
         <div className="flex items-center justify-between px-6 py-4 border-b border-gray-800 bg-[#13151f]">
           <div className="flex items-center gap-2.5">
@@ -141,10 +177,18 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose }) => {
           >
             <Server size={14} /> Servidor WebRTC / Socket
           </button>
+          <button
+            onClick={() => setActiveTab('updates')}
+            className={`py-3 flex items-center gap-1.5 border-b-2 transition ${
+              activeTab === 'updates' ? 'border-purple-500 text-white' : 'border-transparent text-gray-400 hover:text-gray-200'
+            }`}
+          >
+            <Sparkles size={14} className="text-purple-400" /> Atualizações
+          </button>
         </div>
 
         {/* Content Body */}
-        <div className="p-6">
+        <div className="p-6 overflow-y-auto">
           {/* TAB 1: Profile */}
           {activeTab === 'profile' && (
             <form onSubmit={handleSaveProfile} className="space-y-4">
@@ -220,13 +264,13 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose }) => {
 
           {/* TAB 2: Supabase Database */}
           {activeTab === 'supabase' && (
-            <form onSubmit={handleTestAndSaveSupabase} className="space-y-4">
+            <div className="space-y-4">
               <div className="p-3.5 rounded-xl bg-emerald-950/20 border border-emerald-500/30 flex items-start gap-3">
                 <Database size={20} className="text-emerald-400 shrink-0 mt-0.5" />
                 <div className="text-xs text-gray-300 space-y-1">
                   <p className="font-semibold text-emerald-300">Conexão Gratuita com Supabase</p>
                   <p className="text-gray-400 leading-relaxed">
-                    Com o Supabase conectado, todo o chat, backups do jogo e desenhos do quadro ficam salvos na nuvem para você e seus sócios para sempre!
+                    Com o Supabase configurado, o chat, os backups e o quadro são sincronizados entre as contas autorizadas da equipe.
                   </p>
                 </div>
               </div>
@@ -281,16 +325,42 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose }) => {
                 </p>
               </div>
 
+              {isAuthenticated ? (
+                <div className={`p-3 rounded-xl border flex items-center justify-between gap-3 ${isTeamMember ? 'border-emerald-500/30 bg-emerald-500/10' : 'border-amber-500/30 bg-amber-500/10'}`}>
+                  <div className="text-xs text-gray-200">
+                    {isTeamMember === null ? 'Verificando acesso…' : isTeamMember ? 'Sessão autorizada:' : 'E-mail sem autorização da equipe:'} <strong>{authEmail}</strong>
+                  </div>
+                  <button type="button" onClick={() => void signOut()} className="text-xs text-gray-200 hover:text-white">Sair</button>
+                </div>
+              ) : (
+                <form onSubmit={handleAccountSubmit} className="space-y-3 rounded-xl border border-gray-800 bg-[#11121b] p-4">
+                  <div className="flex items-center justify-between">
+                    <h3 className="text-xs font-semibold text-white">Conta da equipe</h3>
+                    <button type="button" onClick={() => setAuthMode(authMode === 'signin' ? 'signup' : 'signin')} className="text-[11px] text-indigo-300 hover:text-indigo-200">
+                      {authMode === 'signin' ? 'Criar conta' : 'Já tenho conta'}
+                    </button>
+                  </div>
+                  <p className="text-[11px] text-gray-400">A criação de conta só funciona para e-mails que o administrador adicionou à lista autorizada no Supabase.</p>
+                  <input type="email" value={accountEmail} onChange={(e) => setAccountEmail(e.target.value)} placeholder="Seu e-mail" required autoComplete="email" className="w-full px-3 py-2 rounded-lg bg-gray-900 border border-gray-700 text-white text-xs" />
+                  <input type="password" value={accountPassword} onChange={(e) => setAccountPassword(e.target.value)} placeholder="Senha (mínimo 8 caracteres)" required minLength={8} autoComplete={authMode === 'signin' ? 'current-password' : 'new-password'} className="w-full px-3 py-2 rounded-lg bg-gray-900 border border-gray-700 text-white text-xs" />
+                  {authMessage && <p className={`text-xs ${authMessage.success ? 'text-emerald-300' : 'text-rose-300'}`}>{authMessage.text}</p>}
+                  <button type="submit" disabled={authBusy || !sbUrl || !sbKey} className="px-4 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white text-xs font-semibold">
+                    {authBusy ? 'Aguarde…' : authMode === 'signin' ? 'Entrar' : 'Criar conta'}
+                  </button>
+                </form>
+              )}
+
               <div className="flex justify-end pt-2">
                 <button
-                  type="submit"
+                  type="button"
+                  onClick={() => void handleTestAndSaveSupabase()}
                   disabled={testingSupabase}
                   className="px-5 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white text-xs font-semibold shadow-lg shadow-emerald-600/30 transition flex items-center gap-1.5"
                 >
                   {testingSupabase ? 'Testando Conexão...' : 'Conectar e Salvar'}
                 </button>
               </div>
-            </form>
+            </div>
           )}
 
           {/* TAB 3: Server */}
@@ -329,6 +399,50 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose }) => {
                 </button>
               </div>
             </form>
+          )}
+
+          {/* TAB 4: Updates */}
+          {activeTab === 'updates' && (
+            <div className="space-y-4">
+              <div className="bg-[#1b1e2c] border border-gray-800 rounded-xl p-4 flex items-center justify-between">
+                <div>
+                  <span className="text-[11px] text-gray-400 font-semibold uppercase tracking-wider">Versão do LPP2 Studio</span>
+                  <div className="flex items-center gap-2 mt-0.5">
+                    <span className="text-xl font-bold text-white font-mono">v{appVersion}</span>
+                    <span className="text-[10px] bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 px-2 py-0.5 rounded-full font-bold">
+                      Instalada
+                    </span>
+                  </div>
+                </div>
+
+                <button
+                  onClick={() => {
+                    onClose();
+                    onOpenUpdates?.();
+                  }}
+                  className="px-4 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-bold transition flex items-center gap-1.5 shadow-lg shadow-indigo-600/30"
+                >
+                  <RefreshCw size={14} />
+                  Verificar Atualizações
+                </button>
+              </div>
+
+              <div className="bg-[#11121b] border border-gray-800 rounded-xl p-4 space-y-3">
+                <div className="flex items-center gap-2 text-indigo-400 font-bold text-xs">
+                  <Sparkles size={16} />
+                  <span>Atualizações Automáticas para Sócios</span>
+                </div>
+                <p className="text-xs text-gray-300 leading-relaxed">
+                  O LPP2 Studio está configurado para buscar novas versões diretamente no GitHub. Toda vez que você lançar uma nova build ou correção:
+                </p>
+                <ul className="text-xs text-gray-400 space-y-1.5 list-disc pl-4">
+                  <li>O aplicativo dos seus sócios avisa que há uma nova versão automaticamente ao iniciar.</li>
+                  <li>O download é feito em segundo plano com barra de progresso.</li>
+                  <li>Basta 1 clique para reiniciar e usar a versão mais recente!</li>
+                  <li>Você não precisa mais compactar ou enviar arquivos de 100MB+ manualmente.</li>
+                </ul>
+              </div>
+            </div>
           )}
         </div>
       </div>

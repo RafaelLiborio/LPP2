@@ -5,20 +5,34 @@
   "description": "LPP2 Game Development Studio Hub - Discord, Aseprite, Whiteboard & Backups",
   "main": "electron/main.cjs",
   "type": "module",
+  "engines": {
+    "node": ">=20"
+  },
   "scripts": {
+    "start": "node server/index.cjs",
     "dev": "concurrently -k -p \"[{name}]\" -n \"SERVER,VITE,ELECTRON\" -c \"yellow.bold,cyan.bold,green.bold\" \"npm run dev:server\" \"npm run dev:vite\" \"npm run dev:electron\"",
     "web": "concurrently -k -p \"[{name}]\" -n \"SERVER,VITE\" -c \"yellow.bold,cyan.bold\" \"npm run dev:server\" \"npm run dev:vite\"",
     "dev:vite": "vite",
     "dev:electron": "wait-on tcp:5173 && cross-env NODE_ENV=development electron .",
-    "dev:server": "node server/index.cjs",
+    "dev:server": "cross-env NODE_ENV=development node server/index.cjs",
     "build": "tsc -b && vite build",
     "build:exe": "npm run build && electron-builder --win portable",
+    "build:installer": "npm run build && electron-builder --win nsis",
+    "build:all": "npm run build && electron-builder --win portable nsis",
+    "release": "npm run build && electron-builder --publish always",
     "dist": "npm run build && electron-builder",
     "preview": "vite preview"
   },
   "build": {
     "appId": "com.lpp2.studio",
     "productName": "LPP2 Studio",
+    "publish": [
+      {
+        "provider": "github",
+        "owner": "RafaelLiborio",
+        "repo": "LPP2"
+      }
+    ],
     "directories": {
       "output": "release"
     },
@@ -31,13 +45,21 @@
     ],
     "win": {
       "target": [
-        "portable"
+        "portable",
+        "nsis"
       ]
+    },
+    "nsis": {
+      "oneClick": true,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": false,
+      "deleteAppDataOnUninstall": false
     }
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.118.0",
     "cors": "^2.8.6",
+    "electron-updater": "^6.8.11",
     "express": "^5.3.0",
     "lucide-react": "^1.66.0",
     "react": "^19.3.1",

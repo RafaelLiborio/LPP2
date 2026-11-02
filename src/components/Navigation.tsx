@@ -1,5 +1,5 @@
 import React from 'react';
-import { MessageSquare, Palette, Layout, Package, Settings, Circle } from 'lucide-react';
+import { MessageSquare, Palette, Layout, Package, Settings, Circle, Sparkles } from 'lucide-react';
 import { useSocket } from '../context/SocketContext';
 
 export type ActiveTab = 'discord' | 'aseprite' | 'whiteboard' | 'backups';
@@ -8,12 +8,16 @@ interface NavigationProps {
   activeTab: ActiveTab;
   setActiveTab: (tab: ActiveTab) => void;
   openSettings: () => void;
+  openUpdates?: () => void;
+  hasUpdate?: boolean;
 }
 
 export const Navigation: React.FC<NavigationProps> = ({
   activeTab,
   setActiveTab,
-  openSettings
+  openSettings,
+  openUpdates,
+  hasUpdate = false
 }) => {
   const { currentUser, serverConnected } = useSocket();
 
@@ -81,6 +85,24 @@ export const Navigation: React.FC<NavigationProps> = ({
 
       {/* Bottom: User Avatar & Settings */}
       <div className="flex flex-col items-center gap-2.5 w-full">
+        {/* Updates button */}
+        {openUpdates && (
+          <button
+            onClick={openUpdates}
+            title={hasUpdate ? 'Nova atualização disponível!' : 'Central de Atualizações'}
+            className={`w-12 h-12 rounded-2xl flex items-center justify-center transition-all relative ${
+              hasUpdate
+                ? 'bg-gradient-to-tr from-indigo-600 to-purple-600 text-white shadow-lg shadow-indigo-600/50 animate-pulse'
+                : 'text-gray-400 hover:text-white hover:bg-gray-800'
+            }`}
+          >
+            <Sparkles size={20} className={hasUpdate ? 'text-white' : 'text-gray-400'} />
+            {hasUpdate && (
+              <span className="absolute top-2 right-2 w-2.5 h-2.5 rounded-full bg-emerald-400 border-2 border-[#101118]" />
+            )}
+          </button>
+        )}
+
         {/* Server connection dot */}
         <div
           title={serverConnected ? 'Servidor Conectado' : 'Servidor Desconectado'}
